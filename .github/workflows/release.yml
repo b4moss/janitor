@@ -46,10 +46,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.meta.outputs.tag }}" \
-            "${{ steps.meta.outputs.asset }}" \
-            --title "${{ steps.meta.outputs.tag }}" \
-            --generate-notes
+          TAG="${{ steps.meta.outputs.tag }}"
+          ASSET="${{ steps.meta.outputs.asset }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading/replacing asset if needed"
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "$TAG" \
+              --generate-notes
+          fi
 
       - name: Update Homebrew tap
         env:

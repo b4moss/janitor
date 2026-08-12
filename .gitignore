@@ -3,3 +3,5 @@ Thumbs.db
 .cursor/
 .vscode/
 .idea/
+node_modules/
+vendor/
