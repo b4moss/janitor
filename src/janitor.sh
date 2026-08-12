@@ -4,18 +4,34 @@ set -euo pipefail
 
 TARGET="."
 DRY_RUN=false
+FORCE=false
+IGNORE_PATTERNS=()
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dry-run)
       DRY_RUN=true
+      shift
+      ;;
+    --force)
+      FORCE=true
+      shift
+      ;;
+    --ignore)
+      if [[ $# -lt 2 ]]; then
+        echo "Option --ignore requires a pattern" >&2
+        exit 1
+      fi
+      IGNORE_PATTERNS+=("$2")
+      shift 2
       ;;
     -*)
-      echo "Unknown option: $arg" >&2
+      echo "Unknown option: $1" >&2
       exit 1
       ;;
     *)
-      TARGET="$arg"
+      TARGET="$1"
+      shift
       ;;
   esac
 done
@@ -48,9 +64,68 @@ format_size() {
   fi
 }
 
-dirs=()
+resolve_trash_dir() {
+  if [[ -n "${JANITOR_TRASH_DIR:-}" ]]; then
+    printf '%s\n' "$JANITOR_TRASH_DIR"
+  elif [[ "$(uname -s)" == Darwin ]]; then
+    printf '%s\n' "$HOME/.Trash"
+  else
+    printf '%s\n' "$HOME/.local/share/Trash/files"
+  fi
+}
+
+unique_trash_dest() {
+  local trash_dir=$1
+  local base
+  base=$(basename "$2")
+  local dest="${trash_dir}/${base}"
+  if [[ ! -e "$dest" ]]; then
+    printf '%s\n' "$dest"
+    return
+  fi
+  local ts
+  ts=$(date +%Y%m%d-%H%M%S)
+  dest="${trash_dir}/${base}.${ts}"
+  local n=1
+  while [[ -e "$dest" ]]; do
+    dest="${trash_dir}/${base}.${ts}.${n}"
+    n=$((n + 1))
+  done
+  printf '%s\n' "$dest"
+}
+
+trash_target() {
+  local dir=$1
+  local trash_dir=$2
+  local dest
+  dest=$(unique_trash_dest "$trash_dir" "$dir")
+  mv "$dir" "$dest"
+}
+
+remove_target() {
+  local dir=$1
+  rm -rf "$dir"
+}
+
+should_ignore() {
+  local dir=$1
+  local pattern
+  if (( ${#IGNORE_PATTERNS[@]} == 0 )); then
+    return 1
+  fi
+  for pattern in "${IGNORE_PATTERNS[@]}"; do
+    # bash =~ uses ERE-like matching against the full path.
+    if [[ "$dir" =~ $pattern ]]; then
+      printf '%s\n' "$pattern"
+      return 0
+    fi
+  done
+  return 1
+}
+
+candidates=()
 while IFS= read -r -d '' dir; do
-  dirs+=("$dir")
+  candidates+=("$dir")
 done < <(
   find "$TARGET" \
     \( -type d -name node_modules \
@@ -62,6 +137,18 @@ done < <(
     -prune \
     -print0
 )
+
+dirs=()
+if (( ${#candidates[@]} > 0 )); then
+  for dir in "${candidates[@]}"; do
+    if matched_pattern=$(should_ignore "$dir"); then
+      printf "%s[skip] matches --ignore '%s': %s%s\n" \
+        "$CYAN" "$matched_pattern" "$dir" "$RESET"
+      continue
+    fi
+    dirs+=("$dir")
+  done
+fi
 
 count=${#dirs[@]}
 
@@ -97,9 +184,15 @@ printf "%sTotal: %s (%s director%s)%s\n" \
 echo
 
 if $DRY_RUN; then
-  prompt="Proceed with dry-run? [y/N] "
+  if $FORCE; then
+    prompt="Proceed with dry-run (would permanently delete)? [y/N] "
+  else
+    prompt="Proceed with dry-run (would move to Trash)? [y/N] "
+  fi
+elif $FORCE; then
+  prompt="Permanently delete these directories? [y/N] "
 else
-  prompt="Remove these directories? [y/N] "
+  prompt="Move these directories to Trash? [y/N] "
 fi
 
 read -r -p "$prompt" answer
@@ -113,20 +206,46 @@ esac
 
 echo
 
+trash_dir=""
+if ! $DRY_RUN && ! $FORCE; then
+  trash_dir=$(resolve_trash_dir)
+  if [[ ! -d "$trash_dir" ]]; then
+    echo "Trash directory not found: $trash_dir" >&2
+    echo "Use --force to permanently delete instead." >&2
+    exit 1
+  fi
+fi
+
 for i in "${!dirs[@]}"; do
   dir="${dirs[$i]}"
   kb="${sizes_kb[$i]}"
   if $DRY_RUN; then
-    printf "%s[dry-run] %s  %s%s\n" "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
-  else
+    if $FORCE; then
+      printf "%s[dry-run] would remove: %s  %s%s\n" \
+        "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
+    else
+      printf "%s[dry-run] would move to Trash: %s  %s%s\n" \
+        "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
+    fi
+  elif $FORCE; then
     printf "%sRemoving: %s  %s%s\n" "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
-    rm -rf "$dir"
+    remove_target "$dir"
+  else
+    printf "%sMoving to Trash: %s  %s%s\n" \
+      "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
+    trash_target "$dir" "$trash_dir"
   fi
 done
 
 echo
 if $DRY_RUN; then
-  printf "%sWould clear: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
-else
+  if $FORCE; then
+    printf "%sWould clear: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
+  else
+    printf "%sWould move to Trash: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
+  fi
+elif $FORCE; then
   printf "%sCleared: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
+else
+  printf "%sMoved to Trash: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
 fi
