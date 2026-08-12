@@ -25,6 +25,17 @@ if [[ ! -d "$TARGET" ]]; then
   exit 1
 fi
 
+# Colors (only when stdout is a TTY).
+if [[ -t 1 ]]; then
+  RED=$'\033[31m'
+  YELLOW=$'\033[33m'
+  GREEN=$'\033[32m'
+  CYAN=$'\033[36m'
+  RESET=$'\033[0m'
+else
+  RED="" YELLOW="" GREEN="" CYAN="" RESET=""
+fi
+
 # Format size in KB as human-readable (KB / MB / GB).
 format_size() {
   local kb=$1
@@ -71,11 +82,18 @@ for dir in "${dirs[@]}"; do
   kb=${kb:-0}
   sizes_kb+=("$kb")
   total_kb=$((total_kb + kb))
-  printf "  %s  %s\n" "$(format_size "$kb")" "$dir"
+  printf "  %s%s%s  %s%s%s\n" \
+    "$RED" "$(format_size "$kb")" "$RESET" \
+    "$YELLOW" "$dir" "$RESET"
 done
 
 echo
-echo "Total: $(format_size "$total_kb") ($count director$([[ $count -eq 1 ]] && echo "y" || echo "ies"))"
+printf "%sTotal: %s (%s director%s)%s\n" \
+  "$RED" \
+  "$(format_size "$total_kb")" \
+  "$count" \
+  "$([[ $count -eq 1 ]] && echo "y" || echo "ies")" \
+  "$RESET"
 echo
 
 if $DRY_RUN; then
@@ -99,16 +117,16 @@ for i in "${!dirs[@]}"; do
   dir="${dirs[$i]}"
   kb="${sizes_kb[$i]}"
   if $DRY_RUN; then
-    printf "[dry-run] %s  %s\n" "$(format_size "$kb")" "$dir"
+    printf "%s[dry-run] %s  %s%s\n" "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
   else
-    printf "Removing: %s  %s\n" "$(format_size "$kb")" "$dir"
+    printf "%sRemoving: %s  %s%s\n" "$CYAN" "$(format_size "$kb")" "$dir" "$RESET"
     rm -rf "$dir"
   fi
 done
 
 echo
 if $DRY_RUN; then
-  echo "Would clear: $(format_size "$total_kb")"
+  printf "%sWould clear: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
 else
-  echo "Cleared: $(format_size "$total_kb")"
+  printf "%sCleared: %s%s\n" "$GREEN" "$(format_size "$total_kb")" "$RESET"
 fi
