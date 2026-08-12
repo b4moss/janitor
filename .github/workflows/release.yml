@@ -11,9 +11,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # Newer ubuntu-24.04 images sometimes leave git without a CA bundle (CAfile: none).
+      GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

@@ -6,9 +6,12 @@ on:
 jobs:
   bats:
     runs-on: ubuntu-latest
+    env:
+      GIT_SSL_CAINFO: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
