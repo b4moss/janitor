@@ -13,6 +13,9 @@ janitor will clean ups...
 ## How to use
 
 ```shell
+# setup
+chmod +x ./janitor.sh
+
 # dry run
 ./janitor.sh --dry-run
 
