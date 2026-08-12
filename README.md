@@ -21,11 +21,14 @@ brew install b4moss/tap/janitor
 # clean up recursively from current directory.
 janitor . 
 
+# When you hit this command, janitor will count up target directories and total filesize.
+# Finally, will ask you really do it or not "Remove these directories? [y/N]"
+
 # execute specific directory
 janitor /path/to/directory
 
 # dry run
-janitor . --dry-run # dry-run
+janitor . --dry-run
 
 ```
 
