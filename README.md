@@ -29,6 +29,9 @@ janitor .
 # execute specific directory
 janitor /path/to/directory
 
+# print version
+janitor --version
+
 # dry run (no move / no delete)
 janitor . --dry-run
 
