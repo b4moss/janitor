@@ -5,11 +5,13 @@ setup() {
   JANITOR="$ROOT/src/janitor.sh"
   WORK="$(mktemp -d)"
   TRASH="$(mktemp -d)"
+  CONF="$(mktemp -d)"
   export JANITOR_TRASH_DIR="$TRASH"
+  export JANITOR_CONFIG_DIR="$CONF"
 }
 
 teardown() {
-  rm -rf "$WORK" "$TRASH"
+  rm -rf "$WORK" "$TRASH" "$CONF"
 }
 
 make_tree() {
@@ -102,4 +104,116 @@ make_tree() {
     false
   fi
   [[ "$output" == *"Would move to Trash"* ]]
+}
+
+@test "creates default config on first run" {
+  [ ! -f "$CONF/config.json" ]
+  make_tree
+  run bash -c "yes | '$JANITOR' '$WORK' --dry-run"
+  [ "$status" -eq 0 ]
+  [ -f "$CONF/config.json" ]
+  run python3 -c "import json; d=json.load(open('$CONF/config.json')); assert d['version']==1"
+  [ "$status" -eq 0 ]
+}
+
+@test "config show prints JSON and creates file if missing" {
+  [ ! -f "$CONF/config.json" ]
+  run "$JANITOR" config show
+  [ "$status" -eq 0 ]
+  [ -f "$CONF/config.json" ]
+  [[ "$output" == *'"version": 1'* ]]
+  [[ "$output" == *'"default_action": "trash"'* ]]
+}
+
+@test "config targets replaces built-in list" {
+  make_tree
+  mkdir -p "$WORK/project-a/dist/out"
+  echo d >"$WORK/project-a/dist/out/a.js"
+  cat >"$CONF/config.json" <<'EOF'
+{
+  "version": 1,
+  "targets": ["dist"],
+  "ignore": [],
+  "trash_dir": null,
+  "default_action": "trash",
+  "confirm": true
+}
+EOF
+  run bash -c "yes | '$JANITOR' '$WORK'"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK/project-a/dist" ]
+  [ -d "$WORK/project-a/node_modules" ]
+  [ -d "$WORK/project-b/vendor" ]
+}
+
+@test "config ignore merges with CLI --ignore" {
+  make_tree
+  cat >"$CONF/config.json" <<'EOF'
+{
+  "version": 1,
+  "targets": ["node_modules", "vendor"],
+  "ignore": ["project-a"],
+  "trash_dir": null,
+  "default_action": "trash",
+  "confirm": true
+}
+EOF
+  run bash -c "yes | '$JANITOR' '$WORK' --ignore 'keep-me'"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK/project-a/node_modules" ]
+  [ -d "$WORK/keep-me/node_modules" ]
+  [ ! -d "$WORK/project-b/vendor" ]
+}
+
+@test "config confirm false skips prompt" {
+  make_tree
+  cat >"$CONF/config.json" <<'EOF'
+{
+  "version": 1,
+  "targets": ["node_modules", "vendor"],
+  "ignore": [],
+  "trash_dir": null,
+  "default_action": "trash",
+  "confirm": false
+}
+EOF
+  # no yes pipe
+  run "$JANITOR" "$WORK"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK/project-a/node_modules" ]
+  [[ "$output" != *"Aborted."* ]]
+}
+
+@test "config default_action force permanently deletes" {
+  make_tree
+  cat >"$CONF/config.json" <<'EOF'
+{
+  "version": 1,
+  "targets": ["node_modules", "vendor"],
+  "ignore": [],
+  "trash_dir": null,
+  "default_action": "force",
+  "confirm": false
+}
+EOF
+  run "$JANITOR" "$WORK"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK/project-a/node_modules" ]
+  entries=("$TRASH"/*)
+  if [[ -e "${entries[0]}" ]]; then
+    false
+  fi
+  [[ "$output" == *"Cleared:"* ]]
+}
+
+@test "invalid config version fails" {
+  cat >"$CONF/config.json" <<'EOF'
+{
+  "version": 99,
+  "targets": ["node_modules"]
+}
+EOF
+  run "$JANITOR" "$WORK"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported config version"* ]]
 }
