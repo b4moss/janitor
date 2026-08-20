@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-JANITOR_VERSION="0.2.1"
+JANITOR_VERSION="0.3.0"
 
 TARGET="."
 DRY_RUN=false

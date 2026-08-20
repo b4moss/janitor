@@ -26,13 +26,13 @@ make_tree() {
 @test "version option prints janitor version" {
   run "$JANITOR" --version
   [ "$status" -eq 0 ]
-  [[ "$output" == "janitor 0.2.1" ]]
+  [[ "$output" == "janitor 0.3.0" ]]
 }
 
 @test "version short option -V prints janitor version" {
   run "$JANITOR" -V
   [ "$status" -eq 0 ]
-  [[ "$output" == "janitor 0.2.1" ]]
+  [[ "$output" == "janitor 0.3.0" ]]
 }
 
 @test "ignore one pattern excludes matching paths" {
