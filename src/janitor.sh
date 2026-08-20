@@ -7,7 +7,162 @@ JANITOR_VERSION="0.2.1"
 TARGET="."
 DRY_RUN=false
 FORCE=false
+CLI_FORCE=false
+CLI_IGNORE_PATTERNS=()
 IGNORE_PATTERNS=()
+TARGETS=(node_modules vendor .venv venv env)
+CONFIRM=true
+CONFIG_TRASH_DIR=""
+
+# --- config helpers ---------------------------------------------------------
+
+default_config_json() {
+  cat <<'EOF'
+{
+  "version": 1,
+  "targets": ["node_modules", "vendor", ".venv", "venv", "env"],
+  "ignore": [],
+  "trash_dir": null,
+  "default_action": "trash",
+  "confirm": true
+}
+EOF
+}
+
+resolve_config_path() {
+  if [[ -n "${JANITOR_CONFIG_PATH:-}" ]]; then
+    printf '%s\n' "$JANITOR_CONFIG_PATH"
+    return
+  fi
+  local dir="${JANITOR_CONFIG_DIR:-$HOME/.config/janitor}"
+  printf '%s\n' "${dir}/config.json"
+}
+
+ensure_config() {
+  local path=$1
+  if [[ -f "$path" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$path")"
+  default_config_json >"$path"
+}
+
+# Validate config and emit a shell-safe env block on stdout.
+# Warnings go to stderr. Exit non-zero on invalid config.
+read_config_env() {
+  local path=$1
+  python3 - "$path" <<'PY'
+import json
+import shlex
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+except json.JSONDecodeError as e:
+    print(f"invalid JSON: {e}", file=sys.stderr)
+    sys.exit(2)
+except OSError as e:
+    print(f"cannot read config: {e}", file=sys.stderr)
+    sys.exit(2)
+
+if not isinstance(data, dict):
+    print("config root must be an object", file=sys.stderr)
+    sys.exit(2)
+
+version = data.get("version", 1)
+if version != 1:
+    print(f"unsupported config version: {version}", file=sys.stderr)
+    sys.exit(2)
+
+allowed = {"version", "targets", "ignore", "trash_dir", "default_action", "confirm"}
+unknown = sorted(set(data) - allowed)
+if unknown:
+    print(
+        "warning: ignoring unknown config keys: " + ", ".join(unknown),
+        file=sys.stderr,
+    )
+
+targets = data.get("targets", ["node_modules", "vendor", ".venv", "venv", "env"])
+if not isinstance(targets, list) or not targets or not all(
+    isinstance(t, str) and t for t in targets
+):
+    print(
+        "config.targets must be a non-empty array of non-empty strings",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+ignore = data.get("ignore", [])
+if not isinstance(ignore, list) or not all(isinstance(i, str) and i for i in ignore):
+    print("config.ignore must be an array of non-empty strings", file=sys.stderr)
+    sys.exit(2)
+
+trash_dir = data.get("trash_dir", None)
+if trash_dir is not None and not isinstance(trash_dir, str):
+    print("config.trash_dir must be a string or null", file=sys.stderr)
+    sys.exit(2)
+
+default_action = data.get("default_action", "trash")
+if default_action not in ("trash", "force"):
+    print("config.default_action must be 'trash' or 'force'", file=sys.stderr)
+    sys.exit(2)
+
+confirm = data.get("confirm", True)
+if not isinstance(confirm, bool):
+    print("config.confirm must be a boolean", file=sys.stderr)
+    sys.exit(2)
+
+def bash_array(name, values):
+    if not values:
+        return f"{name}=()"
+    return f"{name}=(" + " ".join(shlex.quote(v) for v in values) + ")"
+
+print(bash_array("TARGETS", targets))
+print(bash_array("CONFIG_IGNORE", ignore))
+print(f"CONFIG_TRASH_DIR={shlex.quote('' if trash_dir is None else trash_dir)}")
+print(f"CONFIG_DEFAULT_ACTION={shlex.quote(default_action)}")
+print(f"CONFIG_CONFIRM={'true' if confirm else 'false'}")
+PY
+}
+
+cmd_config_show() {
+  local path
+  path=$(resolve_config_path)
+  ensure_config "$path"
+  python3 - "$path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+print(json.dumps(data, indent=2, ensure_ascii=False))
+print(f"\n# config path: {path}", file=sys.stderr)
+PY
+}
+
+# --- argument parsing -------------------------------------------------------
+
+if [[ $# -gt 0 && "$1" == "config" ]]; then
+  shift
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: janitor config show" >&2
+    exit 1
+  fi
+  case "$1" in
+    show)
+      cmd_config_show
+      exit 0
+      ;;
+    *)
+      echo "Unknown config subcommand: $1" >&2
+      echo "Usage: janitor config show" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,6 +175,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --force)
+      CLI_FORCE=true
       FORCE=true
       shift
       ;;
@@ -28,7 +184,7 @@ while [[ $# -gt 0 ]]; do
         echo "Option --ignore requires a pattern" >&2
         exit 1
       fi
-      IGNORE_PATTERNS+=("$2")
+      CLI_IGNORE_PATTERNS+=("$2")
       shift 2
       ;;
     -*)
@@ -41,6 +197,33 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+CONFIG_PATH=$(resolve_config_path)
+ensure_config "$CONFIG_PATH"
+
+CONFIG_IGNORE=()
+CONFIG_DEFAULT_ACTION="trash"
+CONFIG_CONFIRM=true
+config_env=$(read_config_env "$CONFIG_PATH") || exit $?
+# shellcheck disable=SC1090
+eval "$config_env"
+
+# CLI --force wins; otherwise honor config default_action.
+if ! $CLI_FORCE && [[ "$CONFIG_DEFAULT_ACTION" == "force" ]]; then
+  FORCE=true
+fi
+if [[ "$CONFIG_CONFIRM" == "false" ]]; then
+  CONFIRM=false
+fi
+
+# ignore: config + CLI (merge)
+IGNORE_PATTERNS=()
+if (( ${#CONFIG_IGNORE[@]} > 0 )); then
+  IGNORE_PATTERNS+=("${CONFIG_IGNORE[@]}")
+fi
+if (( ${#CLI_IGNORE_PATTERNS[@]} > 0 )); then
+  IGNORE_PATTERNS+=("${CLI_IGNORE_PATTERNS[@]}")
+fi
 
 if [[ ! -d "$TARGET" ]]; then
   echo "Not a directory: $TARGET" >&2
@@ -73,6 +256,8 @@ format_size() {
 resolve_trash_dir() {
   if [[ -n "${JANITOR_TRASH_DIR:-}" ]]; then
     printf '%s\n' "$JANITOR_TRASH_DIR"
+  elif [[ -n "$CONFIG_TRASH_DIR" ]]; then
+    printf '%s\n' "$CONFIG_TRASH_DIR"
   elif [[ "$(uname -s)" == Darwin ]]; then
     printf '%s\n' "$HOME/.Trash"
   else
@@ -129,17 +314,21 @@ should_ignore() {
   return 1
 }
 
+find_expr=()
+for i in "${!TARGETS[@]}"; do
+  if (( i == 0 )); then
+    find_expr+=(-type d -name "${TARGETS[$i]}")
+  else
+    find_expr+=(-o -type d -name "${TARGETS[$i]}")
+  fi
+done
+
 candidates=()
 while IFS= read -r -d '' dir; do
   candidates+=("$dir")
 done < <(
   find "$TARGET" \
-    \( -type d -name node_modules \
-    -o -type d -name vendor \
-    -o -type d -name .venv \
-    -o -type d -name venv \
-    -o -type d -name env \
-    \) \
+    \( "${find_expr[@]}" \) \
     -prune \
     -print0
 )
@@ -201,14 +390,16 @@ else
   prompt="Move these directories to Trash? [y/N] "
 fi
 
-read -r -p "$prompt" answer
-case "$answer" in
-  y|Y|yes|YES) ;;
-  *)
-    echo "Aborted."
-    exit 0
-    ;;
-esac
+if $CONFIRM; then
+  read -r -p "$prompt" answer
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *)
+      echo "Aborted."
+      exit 0
+      ;;
+  esac
+fi
 
 echo
 
