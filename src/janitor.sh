@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+JANITOR_VERSION="0.2.1"
+
 TARGET="."
 DRY_RUN=false
 FORCE=false
@@ -9,6 +11,10 @@ IGNORE_PATTERNS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --version|-V)
+      printf 'janitor %s\n' "$JANITOR_VERSION"
+      exit 0
+      ;;
     --dry-run)
       DRY_RUN=true
       shift

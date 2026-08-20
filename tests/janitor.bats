@@ -21,6 +21,18 @@ make_tree() {
   echo z >"$WORK/keep-me/node_modules/pkg/index.js"
 }
 
+@test "version option prints janitor version" {
+  run "$JANITOR" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "janitor 0.2.1" ]]
+}
+
+@test "version short option -V prints janitor version" {
+  run "$JANITOR" -V
+  [ "$status" -eq 0 ]
+  [[ "$output" == "janitor 0.2.1" ]]
+}
+
 @test "ignore one pattern excludes matching paths" {
   make_tree
   run bash -c "yes | '$JANITOR' '$WORK' --ignore 'keep-me'"
