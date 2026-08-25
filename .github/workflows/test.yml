@@ -13,8 +13,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install bats
-        run: sudo apt-get update && sudo apt-get install -y bats python3
+      - name: Install bats and kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats python3 kcov
 
       - name: Run tests
         run: bats tests/
+
+      - name: Coverage with kcov
+        run: |
+          mkdir -p coverage
+          kcov --bash-dont-parse-binary-dir --include-pattern=src/ coverage/ ./src/janitor.sh --help || true
+          kcov --bash-dont-parse-binary-dir --include-pattern=src/ coverage/ bats tests/ || true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: coverage
+          fail_ci_if_error: false
+          verbose: true
