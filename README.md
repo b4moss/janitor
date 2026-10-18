@@ -1,5 +1,12 @@
 # janitor
 
+[![CI](https://github.com/b4moss/janitor/actions/workflows/test.yml/badge.svg)](https://github.com/b4moss/janitor/actions/workflows/test.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/b4moss/janitor)](https://codecov.io/gh/b4moss/janitor)
+[![Homebrew](https://img.shields.io/badge/Homebrew-b4moss%2Ftap-orange?logo=homebrew&logoColor=white)](https://github.com/b4moss/homebrew-tap)
+[![Release](https://img.shields.io/github/v/release/b4moss/janitor)](https://github.com/b4moss/janitor/releases)
+[![License](https://img.shields.io/github/license/b4moss/janitor)](https://github.com/b4moss/janitor/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/b4moss/janitor/badge)](https://securityscorecards.dev/viewer/?uri=github.com/b4moss/janitor)
+
 Clean up your packages as oneshot.
 
 janitor will clean ups...
